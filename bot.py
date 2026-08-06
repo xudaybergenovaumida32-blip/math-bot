@@ -15,7 +15,7 @@ from aiogram.types import (
 )
 
 API_TOKEN = "8975832001:AAF82sH4YnODYNSF32bVAVLkbDl5t13jWMQ"
-ADMIN_ID = 8151686416                            
+ADMIN_ID = 8151686416                     
 GROUP_IDS = [-5490289085, -5403695064]                
 
 DATA_FILE = "bot_data.json"
@@ -23,11 +23,11 @@ DATA_FILE = "bot_data.json"
 TEST_DATA = {}          
 STUDENTS_DATA = {}          
 STUDENT_TO_NAME = {}        
-PARENT_USERNAME_TO_ID = ""  
+PARENT_USERNAME_TO_ID = {}  
 WRONG_STATS = {}
 STUDENT_RESULTS = {}
 STUDENT_TEST_START = {}
-STUDENT_SESSION = {}    
+STUDENT_SESSION = {}     
 
 DEADLINE_TIME = None         
 LESSON_TIME = "09:00"        
@@ -38,15 +38,17 @@ dp = Dispatcher()
 
 # O'quvchini bosqichma-bosqich qo'shish uchun holatlar (FSM)
 class AddStudentStates(StatesGroup):
-    waiting_for_full_name = State()       # 1-etap: F.I.O (Familyasi ismi)
-    waiting_for_student_username = State() # 2-etap: O'quvchi username
-    waiting_for_group = State()           # 3-etap: Guruh raqami
-    waiting_for_parent_username = State() # 4-etap: Ota-onaning username
+    waiting_for_full_name = State()       
+    waiting_for_student_username = State() 
+    waiting_for_group = State()            
+    waiting_for_parent_username = State() 
 
-# Test qo'shish uchun holatlar (FSM)
+# Viktorina shaklida test qo'shish uchun FSM holatlari
 class AddTestStates(StatesGroup):
-    waiting_for_pack_name = State()       # Test mavzusi (to'plam nomi)
-    waiting_for_question_data = State()   # 10 ta savolni kiritish
+    waiting_for_pack_name = State()       # To'plam nomi (Mavzu)
+    waiting_for_question_text = State()   # Savol matni
+    waiting_for_option = State()          # Variantlarni bittalab yuborish
+    waiting_for_correct_answer = State()  # To'g'ri javobni tanlash (Inline-tugma orqali)
 
 def save_data():
     data = {
@@ -229,7 +231,6 @@ async def process_parent_username(message: Message, state: FSMContext):
     data = await state.get_data()
     student_username = data.get("student_username")
 
-    # O'zining username bilan ota-onaning username bir xil bo'lmasligini qat'iy nazorat qilish
     if parent_username.lower() == student_username.lower():
         await message.answer("❌ **Xatolik!** O'quvchining username'i va ota-onaning username'i bir xil bo'lishi mumkin emas! Iltimos, ota-onaning boshqa username'ini kiriting:")
         return
@@ -255,16 +256,6 @@ async def process_parent_username(message: Message, state: FSMContext):
         parse_mode="Markdown"
     )
 
-@dp.message(Command("add_student"))
-async def add_student_command_handler(message: Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-    await message.answer(
-        "1️⃣ **1-etap:** O'quvchining **F.I.O (Familyasi ismi)**ni yuboring (Masalan: `Содиқов Анвар`):",
-        parse_mode="Markdown"
-    )
-    await state.set_state(AddStudentStates.waiting_for_full_name)
-
 @dp.message(Command("broadcast"))
 async def broadcast_handler(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -272,7 +263,7 @@ async def broadcast_handler(message: Message):
     try:
         text_to_send = message.text.split(" ", 1)[1].strip()
     except Exception:
-        await message.answer("⚠️ Oшибка! Введите текст сообщения:\n`/broadcast Привет, ученики!`", parse_mode="Markdown")
+        await message.answer("⚠️ Ошибка! Введите текст сообщения:\n`/broadcast Привет, ученики!`", parse_mode="Markdown")
         return
 
     count = 0
@@ -300,82 +291,154 @@ async def inline_actions_handler(callback: CallbackQuery, state: FSMContext):
         await callback.message.answer("🗑️ **Для удаления:**\n`/del_student Содиқов Анвар`", parse_mode="Markdown")
     elif callback.data == "start_add_test":
         await callback.message.answer(
-            "📝 **Test qo'shish:**\nIltimos, yangi test uchun **mavzu nomini (to'plam nomini)** kiriting (masalan: `n1` yoki `Matematika-1`):",
+            "📝 **Viktorina testini yaratish:**\nIltimos, yangi test uchun **mavzu (to'plam) nomini** kiriting (masalan: `n1` yoki `Matematika-1`):",
             parse_mode="Markdown"
         )
         await state.set_state(AddTestStates.waiting_for_pack_name)
     
     await callback.answer()
 
+# --- VIKTORINA (QUIZ) USULIDA TEST QO'SHISH JARAYONI ---
+
 @dp.message(AddTestStates.waiting_for_pack_name)
 async def process_pack_name(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     pack_name = message.text.strip()
-    await state.update_data(pack_name=pack_name, current_q_num=1, temp_tests={})
+    await state.update_data(pack_name=pack_name, questions_list=[])
     await message.answer(
         f"✅ Mavzu nomi saqlandi: `{pack_name}`\n\n"
-        f"Hozir **1-savolni** quyidagi formatda yuboring:\n"
-        "`Savol matni | To'g'ri javob | Yechimi (ixtiyoriy)`\n\n"
-        "Masalan:\n`2x = 10 | 5 | 2 ga bo'lib topiladi`",
+        "1️⃣ Endi **1-savol matnini** yuboring:",
         parse_mode="Markdown"
     )
-    await state.set_state(AddTestStates.waiting_for_question_data)
+    await state.set_state(AddTestStates.waiting_for_question_text)
 
-@dp.message(AddTestStates.waiting_for_question_data)
-async def process_question_data(message: Message, state: FSMContext):
+@dp.message(AddTestStates.waiting_for_question_text)
+async def process_question_text(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
+    q_text = message.text.strip()
+    await state.update_data(current_question=q_text, current_options=[])
+    await message.answer(
+        f"✅ Savol qabul qilindi: *{q_text}*\n\n"
+        "Endi ushbu savol uchun **variantlarni bittalab yuboring** (Har bir variantni alohida xabar qilib yuboring).\n"
+        "Barcha variantlarni kiritib bo'lgach, pastdagi tugmani bosing:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Variantlarni kiritib bo'ldim", callback_data="finish_options")]
+        ])
+    )
+    await state.set_state(AddTestStates.waiting_for_option)
+
+@dp.message(AddTestStates.waiting_for_option)
+async def process_option_input(message: Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    option_text = message.text.strip()
+    data = await state.get_data()
+    options = data.get("current_options", [])
     
-    text = message.text.strip()
+    options.append(option_text)
+    await state.update_data(current_options=options)
+    
+    opts_str = "\n".join([f"{i+1}) {opt}" for i, opt in enumerate(options)])
+    await message.answer(
+        f"➕ Variant qo'shildi!\n\n**Hozirgi variantlar:**\n{opts_str}\n\n"
+        "Keyingi variantni yuboring yoki tugmani bosing:",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Variantlarni kiritib bo'ldim", callback_data="finish_options")]
+        ])
+    )
+
+@dp.callback_query(F.data == "finish_options", AddTestStates.waiting_for_option)
+async def finish_options_callback(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    data = await state.get_data()
+    options = data.get("current_options", [])
+    
+    if len(options) < 2:
+        await callback.message.answer("⚠️ Kamida 2 ta variant kiritishingiz kerak!")
+        await callback.answer()
+        return
+
+    # To'g'ri javobni tanlash uchun inline tugmalarni tuzamiz
+    inline_kb = []
+    for i, opt in enumerate(options):
+        inline_kb.append([InlineKeyboardButton(text=f"{i+1}) {opt}", callback_data=f"correct_opt_{i}")])
+    
+    await callback.message.edit_text(
+        "🎯 Ajoyib! Endi bu variantlar ichidan **to'g'ri javobni** tanlang (bitta tugmani bosing):",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=inline_kb)
+    )
+    await state.set_state(AddTestStates.waiting_for_correct_answer)
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("correct_opt_"), AddTestStates.waiting_for_correct_answer)
+async def process_correct_answer_choice(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    
+    idx = int(callback.data.split("_")[2])
     data = await state.get_data()
     pack_name = data.get("pack_name")
-    current_num = data.get("current_num")
-    temp_tests = data.get("temp_tests")
+    q_text = data.get("current_question")
+    options = data.get("current_options")
+    correct_ans = options[idx]
 
-    try:
-        parts = [p.strip() for p in text.split("|")]
-        if len(parts) < 2:
-            await message.answer("⚠️ Format noto'g'ri! Iltimos, quyidagicha yuboring:\n`Savol matni | To'g'ri javob | Yechimi`", parse_mode="Markdown")
-            return
+    if pack_name not in TEST_DATA:
+        TEST_DATA[pack_name] = {}
+    
+    next_num = len(TEST_DATA[pack_name]) + 1
+    TEST_DATA[pack_name][next_num] = {
+        "question": q_text,
+        "options": options,
+        "ans": correct_ans,
+        "solution": "Viktorina testi"
+    }
+    save_data()
 
-        q_text = parts[0]
-        ans = parts[1]
-        solution = parts[2] if len(parts) > 2 else "Решение не указано"
+    await callback.message.edit_text(
+        f"✅ **{next_num}-savol muvaffaqiyatli saqlandi!**\n\n"
+        f"📌 Savol: {q_text}\n"
+        f"✔️ To'g'ri javob: *{correct_ans}*",
+        parse_mode="Markdown"
+    )
 
-        temp_tests[current_num] = {
-            "question": q_text,
-            "ans": ans,
-            "solution": solution
-        }
+    # Keyingi savolga o'tish yoki tugatish uchun taklif
+    await callback.message.answer(
+        "Nima qilamiz?",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="➕ Yana savol qo'shish", callback_data="add_next_question")],
+            [InlineKeyboardButton(text="🏁 Test yaratishni yakunlash", callback_data="finish_all_tests")]
+        ])
+    )
+    await state.set_state(AddTestStates.waiting_for_pack_name) # Vaqtinchalik holat
 
-        if current_num < 10:
-            next_num = current_num + 1
-            await state.update_data(current_num=next_num, temp_tests=temp_tests)
-            await message.answer(
-                f"✅ {current_num}-savol qabul qilindi!\n\n"
-                f"Endi **{next_num}-savolni** yuboring (Format: `Savol | Javob | Yechim`):",
-                parse_mode="Markdown"
-            )
-        else:
-            # 10 ta savol to'ldi, avtomat saqlaymiz
-            if pack_name not in TEST_DATA:
-                TEST_DATA[pack_name] = {}
-            TEST_DATA[pack_name].update(temp_tests)
-            save_data()
-            await state.clear()
+@dp.callback_query(F.data == "add_next_question")
+async def add_next_question_callback(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await callback.message.answer("✍️ Keyingi savol matnini yuboring:", parse_mode="Markdown")
+    await state.set_state(AddTestStates.waiting_for_question_text)
+    await callback.answer()
 
-            saved_text = f"✅ **[{pack_name}]** mavzusi ostida 10 ta savol avtomat tarzda muvaffaqiyatli saqlandi!"
-            await message.answer(saved_text, parse_mode="Markdown")
+@dp.callback_query(F.data == "finish_all_tests")
+async def finish_all_tests_callback(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id != ADMIN_ID:
+        return
+    await state.clear()
+    await callback.message.answer("🎉 Testlar to'plami muvaffaqiyatli yakunlandi va saqlandi! O'quvchilarga xabar yuborildi.", reply_markup=get_admin_keyboard())
+    
+    for g_id in GROUP_IDS:
+        try:
+            await bot.send_message(chat_id=g_id, text="📢 **YANGI VIKTORINA TESTI QO'SHILDI!**\nBotga kirib `/start` orqali testni yechishingiz mumkin! 🚀", parse_mode="Markdown")
+        except Exception:
+            pass
+    await callback.answer()
 
-            # Test saqlanganda o'quvchilar guruhiga (yoki barcha o'quvchilarga) avtomat tarzda test yoki savol bo'lib ko'rinishi uchun xabar yuborish
-            for g_id in GROUP_IDS:
-                try:
-                    await bot.send_message(chat_id=g_id, text=f"📢 **YANGI TEST QO'SHILDI!**\n\nMavzu: `{pack_name}`\nBotga kirib `/start` orqali testni yechishingiz mumkin! 🚀", parse_mode="Markdown")
-                except Exception:
-                    pass
-    except Exception:
-        await message.answer("⚠️ Xatolik yuz berdi. Qaytadan urinib ko'ring (Format: `Savol | Javob | Yechim`)", parse_mode="Markdown")
+# --- DAVOMIY KOD (O'quvchilar vaqt, statistika va boshqalar) ---
 
 @dp.callback_query(F.data.in_(["off_dl", "off_less", "off_t_time"]))
 async def inline_off_handler(callback: CallbackQuery):
@@ -451,33 +514,6 @@ async def set_test_time_handler(message: Message):
     except Exception:
         await message.answer("⚠️ Формат: `/set_test_time 30`", parse_mode="Markdown")
 
-@dp.message(Command("add"))
-async def add_test_handler(message: Message):
-    if message.from_user.id != ADMIN_ID:
-        return
-    try:
-        content = message.text.split(" ", 1)[1]
-        parts = [p.strip() for p in content.split("|")]
-        
-        pack_name = parts[0]  
-        test_num = int(parts[1])
-        question_text = parts[2]
-        ans = parts[3]  
-        solution = parts[4] if len(parts) > 4 else "Решение не указано"
-
-        if pack_name not in TEST_DATA:
-            TEST_DATA[pack_name] = {}
-
-        TEST_DATA[pack_name][test_num] = {
-            "question": question_text,
-            "ans": ans,
-            "solution": solution
-        }
-        save_data()
-        await message.answer(f"✅ **Тест добавлен в топлам [{pack_name}]!** №{test_num}", parse_mode="Markdown")
-    except Exception:
-        await message.answer("⚠️ Формат:\n`/add n1 | 1 | Решите уравнение: 2x = 10 | 5 | Решение: ...`", parse_mode="Markdown")
-
 @dp.message(Command("delete"))
 async def delete_test_handler(message: Message):
     if message.from_user.id != ADMIN_ID:
@@ -510,10 +546,9 @@ async def list_tests_handler(message: Message):
     if message.from_user.id != ADMIN_ID:
         return
     
-    # "Список тестов" ga kirganda + Добавить tugmasi chiqishi uchun Inline klaviatura qo'shildi
     add_test_inline = InlineKeyboardMarkup(
         inline_keyboard=[
-            [InlineKeyboardButton(text="➕ Добавить тест", callback_data="start_add_test")]
+            [InlineKeyboardButton(text="➕ Добавить тест (Viktorina)", callback_data="start_add_test")]
         ]
     )
 
@@ -525,7 +560,7 @@ async def list_tests_handler(message: Message):
     for pack_name, tests in sorted(TEST_DATA.items()):
         text += f"📦 **Топлам: {pack_name}**\n"
         for num, data in sorted(tests.items()):
-            text += f"  • №{num}: {data['question']}\n    💡 Ответ: `{data['ans']}`\n"
+            text += f"  • №{num}: {data['question']}\n    💡 To'g'ri javob: `{data['ans']}`\n"
         text += "───\n"
     await message.answer(text, parse_mode="Markdown", reply_markup=add_test_inline)
 
@@ -748,7 +783,12 @@ async def send_next_question(message_or_callback, user_id: int):
     pack_name, q_num = q_list[idx]
     q_data = TEST_DATA[pack_name][q_num]
 
-    text = f"📌 **Топлам [{pack_name}] - Вопрос №{q_num} ({idx + 1} / {len(q_list)}):**\n{q_data['question']}\n\n✍️ Отправьте ваш ответ:"
+    # Agar savolda variantlar bo'lsa, ularni ham inline tugma qilib chiqarish mumkin yoki matn ko'rinishida
+    options_text = ""
+    if "options" in q_data and q_data["options"]:
+        options_text = "\n\n**Variantlar:**\n" + "\n".join([f"{i+1}) {opt}" for i, opt in enumerate(q_data["options"])])
+
+    text = f"📌 **Топлам [{pack_name}] - Вопрос №{q_num} ({idx + 1} / {len(q_list)}):**\n{q_data['question']}{options_text}\n\n✍️ Отправьте ваш ответ:"
     markup = get_test_navigation_keyboard()
 
     if isinstance(message_or_callback, Message):
@@ -778,15 +818,8 @@ async def finish_test(message_or_callback, user_id: int):
     STUDENT_RESULTS[user_id].append({"date": now_str, "score": correct_count, "total": total})
     save_data()
 
-    finish_text = f"🏁 **Тест завершен!**\n\nРезультат: {correct_count} / {total}\n📸 Теперь отправьте фото решения из тетради!"
-    
-    if isinstance(message_or_callback, Message):
-        await message_or_callback.answer(finish_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
-    elif isinstance(message_or_callback, CallbackQuery):
-        await message_or_callback.message.answer(finish_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
-
     percent = round((correct_count / total) * 100) if total > 0 else 0
-    
+
     group_name, parent_username = "Неизвестно", "Неизвестно"
     for s_name, info in STUDENT_TO_NAME.items():
         if info["user_id"] == user_id:
@@ -794,86 +827,87 @@ async def finish_test(message_or_callback, user_id: int):
             parent_username = info["parent_username"]
             break
 
-    try:
-        await bot.send_message(chat_id=ADMIN_ID, text=f"📩 **ТЕСТ ЗАВЕРШЕН**\n👤 {student_name}\n🏷️ Группа: {group_name}\n📊 Результат: {correct_count}/{total} ({percent}%)\n📅 {now_str}", parse_mode="Markdown")
-    except Exception:
-        pass
-
-    if parent_username and parent_username in PARENT_USERNAME_TO_ID:
-        p_chat_id = PARENT_USERNAME_TO_ID[parent_username]
-        try:
-            await bot.send_message(chat_id=p_chat_id, text=f"📊 **Ваш ребенок сдал тест!**\n👤 {student_name}\n📈 Результат: {correct_count}/{total} ({percent}%)", parse_mode="Markdown")
-        except Exception:
-            pass
-
-    group_report = (
-        "📢 **РЕЗУЛЬТАТ ДОМАШНЕГО ЗАДАНИЯ**\n\n"
+    result_msg = (
+        f"📊 **РЕЗУЛЬТАТЫ ТЕСТИРОВАНИЯ**\n\n"
         f"👤 Ученик: **{student_name}**\n"
         f"🏷️ Группа: {group_name}\n"
-        f"👩‍👦 Родитель: {parent_username}\n"
-        f"📊 Результат: **{correct_count} / {total}** ({percent}%)\n"
-        f"📅 Время: {now_str}"
+        f"✅ Правильных ответов: {correct_count} из {total} ({percent}%)\n"
+        f"📅 Дата: {now_str}"
     )
+
+    for p_user, p_id in PARENT_USERNAME_TO_ID.items():
+        if p_user.lower() == parent_username.lower():
+            try:
+                await bot.send_message(chat_id=p_id, text=result_msg, parse_mode="Markdown")
+            except Exception:
+                pass
+
     for g_id in GROUP_IDS:
-        try:    
-            await bot.send_message(chat_id=g_id, text=group_report, parse_mode="Markdown")
+        try:
+            await bot.send_message(chat_id=g_id, text=result_msg, parse_mode="Markdown")
         except Exception:
             pass
 
+    finish_text = f"🏁 **Тест завершен!**\n\nРезультат: {correct_count} / {total}\n📸 Теперь отправьте фото решения из тетради!"
+    
+    if isinstance(message_or_callback, Message):
+        await message_or_callback.answer(finish_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+    elif isinstance(message_or_callback, CallbackQuery):
+        await message_or_callback.message.answer(finish_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+
 @dp.message()
-async def process_student_input(message: Message):
+async def handle_student_answers(message: Message, state: FSMContext):
     user_id = message.from_user.id
-
-    if user_id == ADMIN_ID and message.text in [
-        "📊 ТОП учеников", "📥 Excel отчет", "⚙️ Управление временем", 
-        "📋 Список тестов", "👨‍🎓 Управление учениками", "📊 Статистика ошибок", "📢 Рассылка сообщений"
-    ]:
+    if user_id not in STUDENTS_DATA:
         return
 
-    if user_id not in STUDENT_SESSION:
+    text = message.text.strip()
+    if text in ["➡️ Следующий вопрос", "⏭ Пропустить"]:
+        session = STUDENT_SESSION.get(user_id)
+        if session:
+            idx = session["current_index"]
+            q_list = session["questions_list"]
+            pack_name, q_num = q_list[idx]
+            if text == "⏭ Пропустить":
+                session["answers"][(pack_name, q_num)] = "пропущено"
+            session["current_index"] += 1
+            await send_next_question(message, user_id)
         return
 
-    if DEADLINE_TIME and datetime.now().strftime("%H:%M") > DEADLINE_TIME:
-        STUDENT_SESSION.pop(user_id, None)
-        await message.answer(f"⛔ Время вышло! Дедлайн: `{DEADLINE_TIME}`", parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+    session = STUDENT_SESSION.get(user_id)
+    if not session:
         return
 
-    if TEST_DURATION_MINUTES:
-        start_time = STUDENT_TEST_START.get(user_id)
-        if start_time and (datetime.now() - start_time > timedelta(minutes=TEST_DURATION_MINUTES)):
-            STUDENT_SESSION.pop(user_id, None)
-            await message.answer("⏳ Время вышло!", parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
-            return
-
-    session = STUDENT_SESSION[user_id]
     idx = session["current_index"]
     q_list = session["questions_list"]
-    pack_name, current_q_num = q_list[idx]
-    q_data = TEST_DATA[pack_name][current_q_num]
+    if idx >= len(q_list):
+        return
 
-    text_input = message.text.strip()
+    pack_name, q_num = q_list[idx]
+    
+    if TEST_DURATION_MINUTES and user_id in STUDENT_TEST_START:
+        start_time = STUDENT_TEST_START[user_id]
+        if datetime.now() - start_time > timedelta(minutes=TEST_DURATION_MINUTES):
+            await message.answer("⏰ Время на прохождение теста истекло!", reply_markup=ReplyKeyboardMarkup(keyboard=[], resize_keyboard=True))
+            await finish_test(message, user_id)
+            return
 
-    if text_input in ["⏭ Пропустить", "➡️ Следующий вопрос"]:
-        session["answers"][(pack_name, current_q_num)] = "пропущено"
-        await message.answer(f"⏭ Пропущено. Правильный ответ: `{q_data['ans']}`\n💡 Решение: {q_data['solution']}", parse_mode="Markdown")
-    else:
-        session["answers"][(pack_name, current_q_num)] = text_input
-        if text_input.lower() == str(q_data['ans']).strip().lower():
-            await message.answer("✅ Верно!", parse_mode="Markdown")
-        else:
-            stat_key = f"{pack_name}_{current_q_num}"
-            WRONG_STATS[stat_key] = WRONG_STATS.get(stat_key, 0) + 1
-            save_data()
-            await message.answer(f"❌ Неверно.\n💡 Правильный ответ: `{q_data['ans']}`\n📖 Решение: {q_data['solution']}", parse_mode="Markdown")
+    session["answers"][(pack_name, q_num)] = text
+    
+    correct_ans = TEST_DATA[pack_name][q_num]["ans"]
+    if str(text).strip().lower() != str(correct_ans).strip().lower():
+        stat_key = f"{pack_name}_{q_num}"
+        WRONG_STATS[stat_key] = WRONG_STATS.get(stat_key, 0) + 1
+        save_data()
 
     session["current_index"] += 1
     await send_next_question(message, user_id)
 
 async def main():
+    logging.basicConfig(level=logging.INFO)
     load_data()
     asyncio.create_task(check_lesson_schedule())
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    async logging.basicConfig(level=logging.INFO)
     asyncio.run(main())
