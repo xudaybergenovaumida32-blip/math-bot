@@ -252,8 +252,6 @@ async def callback_delete_pack(callback: CallbackQuery):
     
     await callback.answer()
 
-# --- СПИСОК УЧЕНИКОВ И СТАТУС ВХОДА ---
-
 @dp.callback_query(F.data == "list_students")
 async def inline_list_students(callback: CallbackQuery):
     if callback.from_user.id != ADMIN_ID:
@@ -334,7 +332,7 @@ async def process_parent_username(message: Message, state: FSMContext):
     }
     save_data()
     await state.clear()
-    await message.answer("🎉 Ученик и родитель успешно добавлены!")
+    await message.answer("🎉 Ученик и родитель успешно добавлены!", reply_markup=get_admin_keyboard())
 
 @dp.message(F.text == "📋 Список тестов")
 async def list_tests_handler(message: Message):
@@ -465,8 +463,11 @@ async def start_cmd(message: Message):
     username = f"@{message.from_user.username}" if message.from_user.username else None
 
     if user_id == ADMIN_ID:
-        # Har safar /start bosganda klaviaturani yangilab chiqaradi
-        await message.answer("👑 Добро пожаловать в админ-панель!", reply_markup=get_admin_keyboard())
+        await message.answer(
+            "👑 **Панель администратора**", 
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown"
+        )
         return
 
     if not username:
