@@ -465,6 +465,7 @@ async def start_cmd(message: Message):
     username = f"@{message.from_user.username}" if message.from_user.username else None
 
     if user_id == ADMIN_ID:
+        # Har safar /start bosganda klaviaturani yangilab chiqaradi
         await message.answer("👑 Добро пожаловать в админ-панель!", reply_markup=get_admin_keyboard())
         return
 
