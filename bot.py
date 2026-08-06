@@ -15,7 +15,7 @@ from aiogram.types import (
 )
 
 API_TOKEN = "8975832001:AAF82sH4YnODYNSF32bVAVLkbDl5t13jWMQ"
-ADMIN_ID = 8151686416                             
+ADMIN_ID = 8151686416                  
 GROUP_IDS = [-5490289085, -5403695064]                
 
 DATA_FILE = "bot_data.json"
@@ -169,7 +169,6 @@ async def callback_start_add_student(callback: CallbackQuery, state: FSMContext)
     await state.set_state(AddStudentStates.waiting_for_student_info)
     await callback.answer()
 
-# Agar admin shunchaki @username yuborsa yoki 1-etapda ma'lumot kiritishsa
 @dp.message(AddStudentStates.waiting_for_student_info)
 async def process_student_info(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
@@ -186,7 +185,6 @@ async def process_student_info(message: Message, state: FSMContext):
         group_num = parts[1]
         student_username = parts[2]
 
-        # Vaqtinchalik ma'lumotni state da saqlaymiz
         await state.update_data(student_name=student_name, group_num=group_num, student_username=student_username)
         
         await message.answer(
@@ -214,7 +212,6 @@ async def process_parent_username(message: Message, state: FSMContext):
     group_num = data.get("group_num")
     student_username = data.get("student_username")
 
-    # Bazaga saqlaymiz
     STUDENT_TO_NAME[student_name] = {
         "group": group_num,
         "student_username": student_username,
@@ -233,20 +230,17 @@ async def process_parent_username(message: Message, state: FSMContext):
         parse_mode="Markdown"
     )
 
-# Agar admin add buyruqsiz to'g'ridan-to'g'ri matnda @username yuborsa ham 1-etapni boshlab yuborish
 @dp.message(F.text.startswith("@") & ~F.state)
 async def direct_username_handler(message: Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
     
-    # Agar faqat bitta @username tashlasa, buni o'quvchi username deb olib 1-etapni davom ettiramiz
     await state.update_data(student_username=message.text.strip())
     await message.answer(
         "✍️ Bu o'quvchining username'i qabul qilindi.\n"
         "Endi o'quvchining **F.I.O va guruhini** yuboring (Masalan: `Содиқов Анвар | 10-А`):",
         parse_mode="Markdown"
     )
-    # Maxsus holatga o'tkazamiz
     await state.set_state(AddStudentStates.waiting_for_student_info)
 
 @dp.message(Command("add_student"))
@@ -264,7 +258,7 @@ async def add_student_command_handler(message: Message, state: FSMContext):
             await state.update_data(student_name=student_name, group_num=group_num, student_username=student_username)
             await message.answer(
                 f"✅ O'quvchi ma'lumotlari qabul qilindi.\n"
-                f"2️⃣ Endi o'ta-onasining `@username`ini yuboring:",
+                f"2️⃣ Endi ota-onasining `@username`ini yuboring:",
                 parse_mode="Markdown"
             )
             await state.set_state(AddStudentStates.waiting_for_parent_username)
@@ -781,18 +775,19 @@ async def process_student_input(message: Message):
         await message.answer(f"⏭ Пропущено. Правильный ответ: `{q_data['ans']}`\n💡 Решение: {q_data['solution']}", parse_mode="Markdown")
     else:
         session["answers"][(pack_name, current_q_num)] = text_input
-        if text_input.lower() == str(q_data["ans"]).strip().lower():
-            await message.answer("✅ Верно!", parse_mode="Markdown")
+        if text_input.lower() == str(q_data['ans']).lower():
+            await message.answer(f"✅ Правильно! 🎉\n💡 Решение: {q_data['solution']}", parse_mode="Markdown")
         else:
+            await message.answer(f"❌ Неправильно.\n💡 Правильный ответ: `{q_data['ans']}`\n💡 Решение: {q_data['solution']}", parse_mode="Markdown")
             stat_key = f"{pack_name}_{current_q_num}"
             WRONG_STATS[stat_key] = WRONG_STATS.get(stat_key, 0) + 1
             save_data()
-            await message.answer(f"❌ Неверно!\n💡 Правильный ответ: `{q_data['ans']}`\n📝 Решение: {q_data['solution']}", parse_mode="Markdown")
 
     session["current_index"] += 1
     await send_next_question(message, user_id)
 
 async def main():
+    logging.basicConfig(level=logging.INFO)
     load_data()
     asyncio.create_task(check_lesson_schedule())
     await dp.start_polling(bot)
